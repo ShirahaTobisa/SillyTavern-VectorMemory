@@ -74,6 +74,8 @@ const state = {
   modelMismatchWarned: false,
   largeIndexWarned: false,
   autoError: false,
+  lastRecall: null,
+  appliedStripTags: null,
   ui: null,
   progress: { current: 0, total: 0 }
 };
@@ -226,7 +228,7 @@ function buildTurnFingerprintSet(chat, keepFloors) {
 
 function applyKeepFloors(chat, index, keepFloors) {
   const keep = Number(keepFloors) || 0;
-  if (!Array.isArray(chat) || keep <= 0 || chat.length <= keep) return;
+  if (!Array.isArray(chat) || keep <= 0 || chat.length <= keep) return 0;
   const start = chat.length - keep;
   const covered = new Set(index.fragments.map(fragment => fragment.turnFingerprint).filter(Boolean));
   const empty = new Set(index.emptyTurnFingerprints.filter(Boolean));
@@ -238,6 +240,7 @@ function applyKeepFloors(chat, index, keepFloors) {
     if (covered.has(marker) || empty.has(marker)) indexes.forEach(indexValue => remove.add(indexValue));
   });
   [...remove].sort((a, b) => b - a).forEach(indexValue => chat.splice(indexValue, 1));
+  return remove.size;
 }
 
 function isAllowedGenerationType(type) {
@@ -639,8 +642,10 @@ function settingsTemplate() {
           </div>
           <h4 class="vm-h">维护</h4>
           <div class="vm-stats-row">当前索引：<span data-vm-stats>0 条 / 0.0 KB</span> <span data-vm-progress></span></div>
+          <div class="vm-stats-row">上次召回：<span data-vm-lastrecall>暂无（发消息生成时自动触发）</span></div>
           <div class="vm-actions">
             <button type="button" class="menu_button" data-vm-action="patrol">立即补录</button>
+            <button type="button" class="menu_button" data-vm-action="trim">修剪未来分片</button>
             <button type="button" class="menu_button" data-vm-action="rebuild">重建索引</button>
             <button type="button" class="menu_button" data-vm-action="clear">清空索引</button>
           </div>
@@ -718,6 +723,14 @@ function refreshUI() {
   const nativeWarning = state.ui.querySelector('[data-vm-native-warning]');
   const extensionSettings = getContext().extensionSettings || getContext().extension_settings || {};
   if (nativeWarning) nativeWarning.hidden = extensionSettings.vectors?.enabled_chats !== true;
+  const lastRecallElement = state.ui.querySelector('[data-vm-lastrecall]');
+  if (lastRecallElement && state.lastRecall) {
+    const recall = state.lastRecall;
+    const detail = recall.count > 0
+      ? `注入 ${recall.count} 条（轮 ${[...new Set(recall.turns)].join(',')}｜分 ${recall.scoreRange}）`
+      : '注入 0 条（无匹配或低于阈值）';
+    lastRecallElement.textContent = `${new Date(recall.at).toLocaleTimeString()} ${detail}，压缩 ${recall.removedFloors} 楼`;
+  }
   warnModelMismatch(index, settings);
 }
 
@@ -789,6 +802,23 @@ function bindUI() {
     await patrol({ interactive: true, full: true });
   };
   state.ui.querySelectorAll('[data-vm-action="rebuild"]').forEach(button => button.addEventListener('click', rebuild));
+  // Same semantics as RPH 1.7.9 story branches: trim by turn number, never by
+  // fingerprint — a cleaning-rule change must not make the whole index look
+  // deletable.
+  state.ui.querySelector('[data-vm-action="trim"]')?.addEventListener('click', async () => {
+    const index = ensureRuntimeIndex();
+    const maxTurn = buildConversationTurns(getChat()).length;
+    const doomed = index.fragments.filter(fragment => Number(fragment.turn) > maxTurn);
+    if (doomed.length === 0) {
+      showToast(`没有未来分片（当前对话共 ${maxTurn} 轮）`, 'info');
+      return;
+    }
+    if (!globalThis.confirm?.(`将删除 ${doomed.length} 条轮号超出当前对话（共 ${maxTurn} 轮）的分片，通常来自开分支前的未来剧情。继续吗？`)) return;
+    index.fragments = index.fragments.filter(fragment => Number(fragment.turn) <= maxTurn);
+    await saveIndex();
+    refreshUI();
+    showToast(`已修剪 ${doomed.length} 条未来分片`, 'success');
+  });
   state.ui.querySelector('[data-vm-action="clear"]')?.addEventListener('click', async () => {
     if (!globalThis.confirm?.('清空当前聊天的向量索引，继续吗？')) return;
     const index = ensureRuntimeIndex();
@@ -846,11 +876,25 @@ export async function vectorMemoryInterceptor(chat, contextSize, abort, type) {
 
   // Only splice the prompt array. Existing chat message objects are never
   // edited, because ST writes those objects back to the chat file.
-  applyKeepFloors(chat, index, settings.keepFloors);
+  const removedFloors = applyKeepFloors(chat, index, settings.keepFloors);
   if (signal?.aborted) return;
   warnModelMismatch(index, settings);
   try {
     const selected = await retrieveMemories(chat, index, settings, signal);
+    const scores = selected.map(item => Number(item.rerankScore ?? item.score ?? 0));
+    state.lastRecall = {
+      at: Date.now(),
+      count: selected.length,
+      turns: selected.map(item => Number(item.memory?.turn) || 0),
+      scoreRange: scores.length ? `${Math.min(...scores).toFixed(2)}~${Math.max(...scores).toFixed(2)}` : '',
+      removedFloors
+    };
+    console.info('[VectorMemory] recall', state.lastRecall, selected.map(item => ({
+      turn: item.memory?.turn,
+      score: Number(item.rerankScore ?? item.score ?? 0).toFixed(3),
+      text: String(item.memory?.paragraph || '').slice(0, 80)
+    })));
+    refreshUI();
     if (!selected.length) return;
     const latest = findLatestUser(chat);
     if (!latest) return;
