@@ -153,6 +153,24 @@ function responseLooksLikeBatchLimit(error) {
   return /batch|limit|exceed|too many|max(imum)?|数量|上限|超出/.test(message);
 }
 
+export async function requestModelList(config = {}, options = {}) {
+  const baseUrl = normalizeBaseUrl(config.baseUrl);
+  if (!baseUrl) throw new Error('请先配置 API 地址');
+  const headers = {};
+  if (config.apiKey !== undefined) headers.Authorization = `Bearer ${String(config.apiKey || '')}`;
+  const response = await fetchWithTimeout(`${baseUrl}/models`, { method: 'GET', headers }, options);
+  let payload;
+  try { payload = await response.json(); } catch (_) { payload = null; }
+  if (!response.ok) {
+    const error = new Error(extractApiError(payload, response.status));
+    error.status = response.status;
+    throw error;
+  }
+  const rows = Array.isArray(payload?.data) ? payload.data : (Array.isArray(payload?.models) ? payload.models : []);
+  const ids = rows.map(row => String(row?.id || row?.name || '')).filter(Boolean);
+  return [...new Set(ids)].sort((a, b) => a.localeCompare(b));
+}
+
 export async function requestRerank(query, documents, config = {}, options = {}) {
   const format = config.rerankApiFormat === 'dashscope' ? 'dashscope' : 'jina';
   const values = (Array.isArray(documents) ? documents : []).map(item => String(item || ''));

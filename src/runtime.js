@@ -17,7 +17,7 @@ import {
   stripVectorMemoryCode,
   trimText
 } from './pure.js';
-import { requestEmbeddings, requestRerank } from './api.js';
+import { requestEmbeddings, requestRerank, requestModelList, normalizeBaseUrl } from './api.js';
 
 const DEFAULT_SETTINGS = Object.freeze({
   enabled: false,
@@ -295,8 +295,9 @@ async function retrieveMemories(chat, index, settings, abortSignal) {
     try {
       const reranked = await requestRerank(query, selected.map(item => item.memory.summary || item.memory.paragraph || ''), {
         rerankApiFormat: settings.rerankApiFormat,
-        rerankUrl: settings.rerankUrl,
-        rerankKey: settings.rerankKey,
+        rerankUrl: settings.rerankUrl
+          || (settings.rerankApiFormat !== 'dashscope' && settings.baseUrl ? `${normalizeBaseUrl(settings.baseUrl)}/rerank` : ''),
+        rerankKey: settings.rerankKey || settings.apiKey,
         rerankModel: settings.rerankModel,
         topN: topK
       }, { signal: abortSignal });
@@ -554,33 +555,43 @@ function settingsTemplate() {
           <div class="vm-warning" data-vm-native-warning hidden>检测到 SillyTavern 内置 Chat Vectorization 已启用，建议二选一。</div>
           <div class="vm-error" data-vm-auto-error hidden>自动巡逻已暂停，请检查 API 配置后手动补录。</div>
           <label class="checkbox_label"><input type="checkbox" data-vm-field="enabled"><span>启用向量记忆</span></label>
-          <h4 class="vm-h">Embedding</h4>
+          <small class="vm-hint">开启后自动把旧对话整理成向量记忆；聊天很长时，旧楼层不再原文发送，改由按当前输入检索到的记忆分片代替，节省 token。</small>
+          <h4 class="vm-h">API 配置</h4>
           <div class="vm-field"><small>预设</small><select class="text_pole" data-vm-field="preset"><option value="siliconflow">SiliconFlow / 聚合器</option><option value="dashscope">DashScope (Qwen)</option><option value="gemini">Gemini (OpenAI compat)</option></select></div>
           <div class="vm-field"><small>Base URL</small><input class="text_pole" type="text" data-vm-field="baseUrl" placeholder="https://api.example.com"></div>
           <div class="vm-field"><small>API Key</small><input class="text_pole" type="password" data-vm-field="apiKey" autocomplete="off"></div>
-          <div class="vm-field"><small>模型</small><input class="text_pole" type="text" data-vm-field="model"></div>
-          <div class="vm-grid">
-            <div class="vm-field"><small>维度</small><input class="text_pole" type="number" min="1" data-vm-field="dimensions" placeholder="1024"></div>
-            <div class="vm-field"><small>批量大小</small><input class="text_pole" type="number" min="1" max="16" data-vm-field="batchSize"></div>
+          <div class="vm-field"><small>Embedding 模型</small>
+            <div class="vm-inline"><select class="text_pole" data-vm-field="model"></select><button type="button" class="menu_button" data-vm-action="fetch-models">获取模型</button></div>
           </div>
-          <h4 class="vm-h">检索与压缩</h4>
-          <div class="vm-field"><small>相似度阈值 <output data-vm-output="similarityThreshold"></output>%</small><input type="range" min="50" max="100" data-vm-field="similarityThreshold"></div>
-          <div class="vm-grid">
-            <div class="vm-field"><small>Top K</small><input class="text_pole" type="number" min="10" max="20" data-vm-field="topK"></div>
-            <div class="vm-field"><small>keepFloors（0 关闭）</small><input class="text_pole" type="number" min="0" max="80" step="2" data-vm-field="keepFloors"></div>
-          </div>
-          <h4 class="vm-h">Rerank</h4>
-          <label class="checkbox_label"><input type="checkbox" data-vm-field="rerankEnabled"><span>启用 rerank</span></label>
-          <div class="vm-grid">
-            <div class="vm-field"><small>格式</small><select class="text_pole" data-vm-field="rerankApiFormat"><option value="jina">jina</option><option value="dashscope">dashscope</option></select></div>
-            <div class="vm-field"><small>模型</small><input class="text_pole" type="text" data-vm-field="rerankModel"></div>
-          </div>
-          <div class="vm-field"><small>URL</small><input class="text_pole" type="text" data-vm-field="rerankUrl"></div>
-          <div class="vm-field"><small>Key</small><input class="text_pole" type="password" data-vm-field="rerankKey" autocomplete="off"></div>
-          <div class="vm-field"><small>召回阈值 <output data-vm-output="recallThreshold"></output>%</small><input type="range" min="30" max="100" data-vm-field="recallThreshold"></div>
-          <div class="vm-grid">
-            <div class="vm-field"><small>候选数</small><input class="text_pole" type="number" min="20" max="100" data-vm-field="rerankCandidates"></div>
-            <div class="vm-field"><small>rerank 阈值 <output data-vm-output="rerankThreshold"></output></small><input type="range" min="0" max="1" step="0.01" data-vm-field="rerankThreshold"></div>
+          <div class="vm-actions"><button type="button" class="menu_button" data-vm-action="test">测试连接</button></div>
+          <div class="inline-drawer vm-advanced">
+            <div class="inline-drawer-toggle inline-drawer-header">
+              <b>高级设置（默认即可，不用动）</b>
+              <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
+            </div>
+            <div class="inline-drawer-content">
+              <div class="vm-grid">
+                <div class="vm-field"><small>维度</small><input class="text_pole" type="number" min="1" data-vm-field="dimensions" placeholder="1024"></div>
+                <div class="vm-field"><small>批量大小</small><input class="text_pole" type="number" min="1" max="16" data-vm-field="batchSize"></div>
+              </div>
+              <div class="vm-field"><small>相似度阈值 <output data-vm-output="similarityThreshold"></output>%（低于此分数的记忆不召回）</small><input type="range" min="50" max="100" data-vm-field="similarityThreshold"></div>
+              <div class="vm-grid">
+                <div class="vm-field"><small>每次注入条数上限</small><input class="text_pole" type="number" min="10" max="20" data-vm-field="topK"></div>
+                <div class="vm-field"><small>保留楼层数（0=不压缩）</small><input class="text_pole" type="number" min="0" max="80" step="2" data-vm-field="keepFloors"></div>
+              </div>
+              <label class="checkbox_label"><input type="checkbox" data-vm-field="rerankEnabled"><span>启用 rerank 重排（可选，进一步提升召回质量）</span></label>
+              <div class="vm-grid">
+                <div class="vm-field"><small>格式</small><select class="text_pole" data-vm-field="rerankApiFormat"><option value="jina">jina</option><option value="dashscope">dashscope</option></select></div>
+                <div class="vm-field"><small>Rerank 模型</small><select class="text_pole" data-vm-field="rerankModel"></select></div>
+              </div>
+              <div class="vm-field"><small>Rerank URL（留空 = Base URL + /rerank）</small><input class="text_pole" type="text" data-vm-field="rerankUrl" placeholder="留空自动推导"></div>
+              <div class="vm-field"><small>Rerank Key（留空 = 复用上方 API Key）</small><input class="text_pole" type="password" data-vm-field="rerankKey" autocomplete="off"></div>
+              <div class="vm-field"><small>召回阈值 <output data-vm-output="recallThreshold"></output>%</small><input type="range" min="30" max="100" data-vm-field="recallThreshold"></div>
+              <div class="vm-grid">
+                <div class="vm-field"><small>候选数</small><input class="text_pole" type="number" min="20" max="100" data-vm-field="rerankCandidates"></div>
+                <div class="vm-field"><small>rerank 阈值 <output data-vm-output="rerankThreshold"></output></small><input type="range" min="0" max="1" step="0.01" data-vm-field="rerankThreshold"></div>
+              </div>
+            </div>
           </div>
           <h4 class="vm-h">维护</h4>
           <div class="vm-stats-row">当前索引：<span data-vm-stats>0 条 / 0.0 KB</span> <span data-vm-progress></span></div>
@@ -612,9 +623,38 @@ function estimateIndexSize(index) {
   try { return new TextEncoder().encode(JSON.stringify({ fragments: index.fragments.map(serializableFragment), emptyTurnFingerprints: index.emptyTurnFingerprints })).length; } catch (_) { return JSON.stringify(index).length; }
 }
 
+function ensureSelectOption(select, value) {
+  if (!select || select.tagName !== 'SELECT') return;
+  const target = String(value ?? '');
+  if (![...select.options].some(option => option.value === target)) {
+    const option = document.createElement('option');
+    option.value = target;
+    option.textContent = target || '（未选择，点「获取模型」）';
+    select.insertBefore(option, select.firstChild);
+  }
+}
+
+function fillModelSelect(select, models, current) {
+  if (!select) return;
+  const value = String(current || select.value || '');
+  select.innerHTML = '';
+  const ids = [...(Array.isArray(models) ? models : [])];
+  if (value && !ids.includes(value)) ids.unshift(value);
+  ids.forEach(id => {
+    const option = document.createElement('option');
+    option.value = id;
+    option.textContent = id;
+    select.appendChild(option);
+  });
+  ensureSelectOption(select, value);
+  select.value = value;
+}
+
 function refreshUI() {
   if (!state.ui) return;
   const settings = getSettingsSnapshot();
+  ensureSelectOption(state.ui.querySelector('[data-vm-field="model"]'), settings.model);
+  ensureSelectOption(state.ui.querySelector('[data-vm-field="rerankModel"]'), settings.rerankModel);
   state.ui.querySelectorAll('[data-vm-field]').forEach(element => setFieldValue(element, settings[element.dataset.vmField]));
   state.ui.querySelectorAll('[data-vm-output]').forEach(element => {
     const value = settings[element.dataset.vmOutput];
@@ -707,6 +747,36 @@ function bindUI() {
     index.emptyTurnFingerprints = [];
     await saveIndex();
     refreshUI();
+  });
+  state.ui.querySelector('[data-vm-action="fetch-models"]')?.addEventListener('click', async event => {
+    const button = event.currentTarget;
+    const settings = getSettingsSnapshot();
+    try {
+      button.disabled = true;
+      const models = await requestModelList(settings);
+      const embedModels = models.filter(id => /embed|bge|gte|\be5\b|e5-/i.test(id));
+      const rerankModels = models.filter(id => /rerank/i.test(id));
+      fillModelSelect(state.ui.querySelector('[data-vm-field="model"]'), embedModels.length ? embedModels : models, settings.model);
+      fillModelSelect(state.ui.querySelector('[data-vm-field="rerankModel"]'), rerankModels.length ? rerankModels : models, settings.rerankModel);
+      showToast(`获取到 ${models.length} 个模型，已过滤出 embedding 候选 ${embedModels.length} 个`, 'success');
+    } catch (error) {
+      showToast(`获取模型失败：${error.message || error}`, 'error');
+    } finally {
+      button.disabled = false;
+    }
+  });
+  state.ui.querySelector('[data-vm-action="test"]')?.addEventListener('click', async event => {
+    const button = event.currentTarget;
+    const settings = getSettingsSnapshot();
+    try {
+      button.disabled = true;
+      const [vector] = await requestEmbeddings(['连接测试'], settings);
+      showToast(`连接成功：${settings.model}，维度 ${vector.length}`, 'success');
+    } catch (error) {
+      showToast(`连接失败：${error.message || error}`, 'error');
+    } finally {
+      button.disabled = false;
+    }
   });
   state.ui.querySelector('[data-vm-action="search"]')?.addEventListener('click', () => manualSearch(state.ui.querySelector('[data-vm-search]')?.value || ''));
   state.ui.querySelector('[data-vm-search]')?.addEventListener('keydown', event => {

@@ -29,6 +29,27 @@
   gap: 0 10px;
 }
 
+.vm-inline {
+  display: flex;
+  align-items: center;
+  gap: 0.4em;
+}
+
+.vm-inline select {
+  flex: 1;
+  min-width: 0;
+}
+
+.vm-hint {
+  display: block;
+  opacity: 0.7;
+  margin: 2px 0 8px;
+}
+
+.vm-advanced {
+  margin: 8px 0;
+}
+
 .vm-warning,
 .vm-error {
   padding: 0.45em 0.6em;

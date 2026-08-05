@@ -13,10 +13,10 @@ SillyTavern 1.18.0 的第三方向量记忆扩展。它把稳定滞后的对话�
 ## 设置
 
 - 总开关默认关闭。关闭时不巡逻、不压缩、不注入。
-- Embedding 使用 OpenAI 兼容 `POST /embeddings`。默认预设为 SiliconFlow/聚合器，模型示例为 `Qwen/Qwen3-Embedding-8B`，维度建议 1024，批量默认 8。
+- 基础配置只有四项：预设、Base URL、API Key、Embedding 模型。模型点「获取模型」从 `GET /models` 拉列表下拉选择（自动过滤出 embedding 类模型），「测试连接」一键验证配置并报告维度。
+- 维度/批量/相似度阈值/注入条数/保留楼层和整个 rerank 区都收在「高级设置」折叠里，默认值即推荐值（维度 1024、批量 8、阈值 50、Top K 10、保留 50 层，保留楼层设 0 可关闭压缩）。
+- rerank 默认关闭。URL 留空自动用 Base URL + `/rerank`，Key 留空复用上方 API Key；`jina` 格式默认模型 `Qwen/Qwen3-Reranker-8B`，阈值默认 0.35，不同模型的分数标定不同，需要自行调整。
 - DashScope 和 Gemini 预设会填入完整兼容路径；改 embedding 模型或维度后需要手动重建索引，旧分片不会自动清理。
-- 检索阈值默认 50，Top K 默认 10，`keepFloors` 默认 50；设为 0 可关闭压缩。
-- rerank 默认关闭。`jina` 格式默认模型为 `Qwen/Qwen3-Reranker-8B`，阈值默认 0.35。不同模型的分数标定不同，需要自行调整。
 - 维护区可查看当前聊天的条数与元数据体积、立即补录、重建/清空索引，以及复用完整召回链路的手动检索。
 
 索引保存到当前聊天的 `chatMetadata.vector_memory`，全局参数保存到 `extension_settings.vectorMemory`。切换聊天会重建运行态解码向量。检测到 SillyTavern 内置 Chat Vectorization 时会显示二选一提示。

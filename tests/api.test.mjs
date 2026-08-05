@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { embedBatchesAdaptive, normalizeBaseUrl, requestEmbeddings, requestRerank } from '../src/api.js';
+import { embedBatchesAdaptive, normalizeBaseUrl, requestEmbeddings, requestModelList, requestRerank } from '../src/api.js';
 
 function response(payload, status = 200) {
   return { ok: status >= 200 && status < 300, status, json: async () => payload };
@@ -68,4 +68,18 @@ test('rerank HTTP failure is surfaced for runtime fallback', async () => {
       throw error;
     }
   }, /server down/);
+});
+
+test('model list is fetched from /models, deduped and sorted', async () => {
+  let captured;
+  const models = await requestModelList({ baseUrl: 'https://example.test', apiKey: 'k' }, {
+    fetchImpl: async (url, init) => {
+      captured = { url, method: init.method, auth: init.headers.Authorization };
+      return response({ data: [{ id: 'z-embed' }, { id: 'a-embed' }, { id: 'z-embed' }, { name: 'named-model' }] });
+    }
+  });
+  assert.equal(captured.url, 'https://example.test/v1/models');
+  assert.equal(captured.method, 'GET');
+  assert.equal(captured.auth, 'Bearer k');
+  assert.deepEqual(models, ['a-embed', 'named-model', 'z-embed']);
 });
