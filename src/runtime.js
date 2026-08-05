@@ -343,14 +343,18 @@ function getSettingsSnapshot() {
 
 async function patrol(options = {}) {
   const settings = getSettingsSnapshot();
-  if (!settings.enabled || state.patrolRunning || state.generationInProgress) {
-    if (state.generationInProgress) state.pendingPatrol = true;
+  const say = (message) => { if (options.interactive) showToast(message, 'warning'); };
+  if (!settings.enabled) { say('请先勾选「启用向量记忆」'); return 0; }
+  if (state.patrolRunning) { say('补录已在进行中'); return 0; }
+  if (state.generationInProgress) {
+    state.pendingPatrol = true;
+    say('正在生成回复，结束后会自动补录');
     return 0;
   }
   const context = getContext();
-  if (context.characterId === undefined) return 0;
+  if (context.characterId === undefined) { say('群聊或未选择角色，暂不支持'); return 0; }
   const chat = getChat();
-  if (!chat.length) return 0;
+  if (!chat.length) { say('当前聊天还没有消息'); return 0; }
   const index = ensureRuntimeIndex();
   if (!options.interactive && index.fragments.length > 5000) {
     state.autoError = true;
@@ -364,6 +368,7 @@ async function patrol(options = {}) {
 
   state.patrolRunning = true;
   state.patrolAbort = new AbortController();
+  refreshUI();
   const signal = state.patrolAbort.signal;
   const turns = buildConversationTurns(chat);
   const eligibleTurns = options.full ? turns : turns.slice(0, Math.max(0, turns.length - 2));
@@ -405,6 +410,9 @@ async function patrol(options = {}) {
   });
 
   updateProgress(0, fragmentItems.length);
+  if (fragmentItems.length === 0 && options.interactive) {
+    showToast('没有需要补录的新内容（最近 2 轮会等对话稳定后入库）', 'info');
+  }
   let added = 0;
   let cursor = 0;
   let batchSize = clampSetting(settings.batchSize, 1, 16, 8);
@@ -466,7 +474,7 @@ async function patrol(options = {}) {
     }
     await saveIndex();
     state.autoError = false;
-    if (options.interactive) showToast(`向量记忆补录完成：新增 ${added} 条`, 'success');
+    if (options.interactive && fragmentItems.length > 0) showToast(`向量记忆补录完成：新增 ${added} 条`, 'success');
     return added;
   } catch (error) {
     await saveIndex();
@@ -666,6 +674,11 @@ function refreshUI() {
   if (stats) stats.textContent = `${index.fragments.length} 条 / ${(bytes / 1024).toFixed(1)} KB`;
   const autoError = state.ui.querySelector('[data-vm-auto-error]');
   if (autoError) autoError.hidden = !state.autoError;
+  const patrolButton = state.ui.querySelector('[data-vm-action="patrol"]');
+  if (patrolButton) {
+    patrolButton.disabled = state.patrolRunning;
+    patrolButton.textContent = state.patrolRunning ? '补录中…' : '立即补录';
+  }
   const nativeWarning = state.ui.querySelector('[data-vm-native-warning]');
   const extensionSettings = getContext().extensionSettings || getContext().extension_settings || {};
   if (nativeWarning) nativeWarning.hidden = extensionSettings.vectors?.enabled_chats !== true;
@@ -718,6 +731,7 @@ function bindUI() {
       } else {
         settings[key] = value;
         saveSettings();
+        if (key === 'enabled' && value === true) schedulePatrol(500);
       }
       refreshUI();
     });
