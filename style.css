@@ -50,6 +50,12 @@
   margin: 8px 0;
 }
 
+.vm-settings .menu_button {
+  white-space: nowrap;
+  flex-shrink: 0;
+  width: auto;
+}
+
 .vm-warning,
 .vm-error {
   padding: 0.45em 0.6em;
