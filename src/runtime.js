@@ -21,6 +21,7 @@ import { requestEmbeddings, requestRerank, requestModelList, normalizeBaseUrl } 
 
 const DEFAULT_SETTINGS = Object.freeze({
   enabled: false,
+  autoPatrol: false,
   preset: 'siliconflow',
   baseUrl: 'https://api.siliconflow.cn',
   apiKey: '',
@@ -358,6 +359,7 @@ async function patrol(options = {}) {
   const settings = getSettingsSnapshot();
   const say = (message) => { if (options.interactive) showToast(message, 'warning'); };
   if (!settings.enabled) { say('请先勾选「启用向量记忆」'); return 0; }
+  if (!options.interactive && !settings.autoPatrol) return 0;
   if (state.patrolRunning) { say('补录已在进行中'); return 0; }
   if (isGenerationActive()) {
     state.pendingPatrol = true;
@@ -546,16 +548,17 @@ function bindEvents() {
     state.generationStartedAt = 0;
     if (state.pendingPatrol) {
       state.pendingPatrol = false;
-      schedulePatrol(2000);
+      // A deferred manual click was promised a follow-up, so resume as interactive.
+      schedulePatrol(2000, { interactive: true });
     }
   };
   on('MESSAGE_RECEIVED', () => {
     clearGenerationFlag();
-    schedulePatrol(2000);
+    if (getExtensionSettings().autoPatrol) schedulePatrol(2000);
   });
   on('CHAT_CHANGED', () => {
     resetRuntimeForChat();
-    schedulePatrol(3000);
+    if (getExtensionSettings().autoPatrol) schedulePatrol(3000);
     refreshUI();
   });
   on('GENERATION_STARTED', (_type, _params, dryRun) => {
@@ -582,7 +585,9 @@ function settingsTemplate() {
           <div class="vm-warning" data-vm-native-warning hidden>检测到 SillyTavern 内置 Chat Vectorization 已启用，建议二选一。</div>
           <div class="vm-error" data-vm-auto-error hidden>自动巡逻已暂停，请检查 API 配置后手动补录。</div>
           <label class="checkbox_label"><input type="checkbox" data-vm-field="enabled"><span>启用向量记忆</span></label>
-          <small class="vm-hint">开启后自动把旧对话整理成向量记忆；聊天很长时，旧楼层不再原文发送，改由按当前输入检索到的记忆分片代替，节省 token。</small>
+          <small class="vm-hint">开启后旧对话可整理成向量记忆；聊天很长时，旧楼层不再原文发送，改由按当前输入检索到的记忆分片代替，节省 token。</small>
+          <label class="checkbox_label"><input type="checkbox" data-vm-field="autoPatrol"><span>自动补录（RPH 原版行为：AI 回复后自动提取记忆）</span></label>
+          <small class="vm-hint">默认关闭：只有点「立即补录」才调用 embedding。打开后每次回复完成、切换聊天时自动增量提取。</small>
           <h4 class="vm-h">API 配置</h4>
           <div class="vm-field"><small>预设</small><select class="text_pole" data-vm-field="preset"><option value="siliconflow">SiliconFlow / 聚合器</option><option value="dashscope">DashScope (Qwen)</option><option value="gemini">Gemini (OpenAI compat)</option></select></div>
           <div class="vm-field"><small>Base URL</small><input class="text_pole" type="text" data-vm-field="baseUrl" placeholder="https://api.example.com"></div>
@@ -750,7 +755,8 @@ function bindUI() {
       } else {
         settings[key] = value;
         saveSettings();
-        if (key === 'enabled' && value === true) schedulePatrol(500);
+        if (key === 'enabled' && value === true && settings.autoPatrol) schedulePatrol(500);
+        if (key === 'autoPatrol' && value === true && settings.enabled) schedulePatrol(500);
       }
       refreshUI();
     });
