@@ -58,7 +58,7 @@ const PRESETS = {
 const state = {
   initialized: false,
   eventsBound: false,
-  generationInProgress: false,
+  generationStartedAt: 0,
   pendingPatrol: false,
   patrolTimer: null,
   patrolAbort: null,
@@ -341,12 +341,25 @@ function getSettingsSnapshot() {
   return settings;
 }
 
+// The flag self-heals: manual stops emit only GENERATION_STOPPED, and ST
+// dry runs emit GENERATION_STARTED without a matching GENERATION_ENDED, so
+// a latched boolean would stick forever.
+function isGenerationActive() {
+  if (!state.generationStartedAt) return false;
+  if (Date.now() - state.generationStartedAt > 180_000) {
+    console.warn('[VectorMemory] generation flag stale for 3min, clearing');
+    state.generationStartedAt = 0;
+    return false;
+  }
+  return true;
+}
+
 async function patrol(options = {}) {
   const settings = getSettingsSnapshot();
   const say = (message) => { if (options.interactive) showToast(message, 'warning'); };
   if (!settings.enabled) { say('请先勾选「启用向量记忆」'); return 0; }
   if (state.patrolRunning) { say('补录已在进行中'); return 0; }
-  if (state.generationInProgress) {
+  if (isGenerationActive()) {
     state.pendingPatrol = true;
     say('正在生成回复，结束后会自动补录');
     return 0;
@@ -529,23 +542,29 @@ function bindEvents() {
   const source = context.eventSource;
   if (!source || typeof source.on !== 'function') return;
   const on = (name, callback) => source.on(eventName(context, name), callback);
-  on('MESSAGE_RECEIVED', () => schedulePatrol(2000));
+  const clearGenerationFlag = () => {
+    state.generationStartedAt = 0;
+    if (state.pendingPatrol) {
+      state.pendingPatrol = false;
+      schedulePatrol(2000);
+    }
+  };
+  on('MESSAGE_RECEIVED', () => {
+    clearGenerationFlag();
+    schedulePatrol(2000);
+  });
   on('CHAT_CHANGED', () => {
     resetRuntimeForChat();
     schedulePatrol(3000);
     refreshUI();
   });
-  on('GENERATION_STARTED', () => {
-    state.generationInProgress = true;
+  on('GENERATION_STARTED', (_type, _params, dryRun) => {
+    if (dryRun) return;
+    state.generationStartedAt = Date.now();
     if (state.patrolAbort) state.patrolAbort.abort();
   });
-  on('GENERATION_ENDED', () => {
-    state.generationInProgress = false;
-    if (state.pendingPatrol) {
-      state.pendingPatrol = false;
-      schedulePatrol(2000);
-    }
-  });
+  on('GENERATION_ENDED', clearGenerationFlag);
+  on('GENERATION_STOPPED', clearGenerationFlag);
   on('MESSAGE_DELETED', () => refreshUI());
   state.eventsBound = true;
 }
