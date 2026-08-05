@@ -1,0 +1,38 @@
+# Vector Memory (RPH)
+
+SillyTavern 1.18.0 的第三方向量记忆扩展。它把稳定滞后的对话轮清洗、分段、量化入库，并在生成前通过 embedding + lexical boost（可选 rerank）召回相关历史，再用 `keepFloors` 从本次 prompt 中置换已覆盖的旧轮。
+
+## 安装
+
+1. 将本仓库推到自己的 GitHub（本地仓库已经 `git init`，不会自动 push）。
+2. 在 SillyTavern 打开 **Extensions → Install extension**。
+3. 填写仓库 URL，确认安装并重载页面。
+
+本地开发也可以把整个目录放到 `scripts/extensions/third-party/`。`manifest.json` 的相对 `index.js`、`style.css` 和 `src/` 路径与 Install extension 安装一致。
+
+## 设置
+
+- 总开关默认关闭。关闭时不巡逻、不压缩、不注入。
+- Embedding 使用 OpenAI 兼容 `POST /embeddings`。默认预设为 SiliconFlow/聚合器，模型示例为 `Qwen/Qwen3-Embedding-8B`，维度建议 1024，批量默认 8。
+- DashScope 和 Gemini 预设会填入完整兼容路径；改 embedding 模型或维度后需要手动重建索引，旧分片不会自动清理。
+- 检索阈值默认 50，Top K 默认 10，`keepFloors` 默认 50；设为 0 可关闭压缩。
+- rerank 默认关闭。`jina` 格式默认模型为 `Qwen/Qwen3-Reranker-8B`，阈值默认 0.35。不同模型的分数标定不同，需要自行调整。
+- 维护区可查看当前聊天的条数与元数据体积、立即补录、重建/清空索引，以及复用完整召回链路的手动检索。
+
+索引保存到当前聊天的 `chatMetadata.vector_memory`，全局参数保存到 `extension_settings.vectorMemory`。切换聊天会重建运行态解码向量。检测到 SillyTavern 内置 Chat Vectorization 时会显示二选一提示。
+
+## 限制
+
+只支持单角色非群聊；群聊会完全旁路。`quiet`/`impersonate` 生成旁路，不做主动工具检索、classic 总结、本地 embedding、World Info/Data Bank 联动，也不读取 ST 内置 vectors 数据。消息编辑或删除不会自动清理孤儿分片，积累较多时请重建索引。索引超过 5000 条后自动巡逻暂停，手动补录仍可执行。
+
+生成拦截器只对传入的 chat 数组做 splice，绝不修改消息对象本身，因此注入内容不会写回真实聊天记录。
+
+## 自测
+
+仓库不需要 SillyTavern 运行时即可测试纯函数和请求层：
+
+```bash
+npm test
+```
+
+测试覆盖清洗、1800/400 边界、fragment 组装、指纹去重、int8 量化/解码余弦误差、lexical boost、同轮合并、embedding 响应排序、批量降半和 rerank 失败回退。
