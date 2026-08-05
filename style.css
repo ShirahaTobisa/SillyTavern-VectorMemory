@@ -1,37 +1,81 @@
-.vm-settings {
-  border-top: 1px solid var(--SmartThemeBorderColor, #777);
-  padding: 0.6em 0;
-  font-size: 0.95em;
+/* Native ST classes (text_pole / menu_button / inline-drawer) carry the theme;
+   this file only handles spacing and the few custom blocks. */
+
+.vm-settings .vm-h {
+  margin: 10px 0 4px;
+  padding-bottom: 2px;
+  border-bottom: 1px solid var(--SmartThemeBorderColor, #777);
 }
 
-.vm-settings fieldset {
-  margin: 0.6em 0;
-  padding: 0.5em;
-  border: 1px solid var(--SmartThemeBorderColor, #777);
+.vm-settings .vm-field {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 5px 0;
 }
 
-.vm-settings label {
+.vm-settings .vm-field > small {
+  opacity: 0.8;
+}
+
+.vm-settings .vm-field input[type="range"] {
+  width: 100%;
+  margin: 0;
+}
+
+.vm-settings .vm-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0 10px;
+}
+
+.vm-warning,
+.vm-error {
+  padding: 0.45em 0.6em;
+  margin: 0.4em 0;
+  border-left: 3px solid #d99b00;
+  border-radius: 4px;
+  background: color-mix(in srgb, #d99b00 15%, transparent);
+}
+
+.vm-error {
+  border-left-color: #d64b4b;
+  background: color-mix(in srgb, #d64b4b 15%, transparent);
+}
+
+.vm-stats-row {
+  margin: 4px 0;
+  opacity: 0.9;
+}
+
+.vm-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4em;
+  margin: 0.5em 0;
+}
+
+.vm-search-row {
   display: flex;
   align-items: center;
-  gap: 0.45em;
-  margin: 0.35em 0;
+  gap: 0.4em;
+  margin: 0.4em 0;
 }
 
-.vm-settings label:not(.vm-switch) input,
-.vm-settings label:not(.vm-switch) select {
+.vm-search-row input {
   flex: 1;
   min-width: 0;
 }
 
-.vm-settings input[type="range"] { flex: 1; }
-.vm-switch { cursor: pointer; }
-.vm-warning, .vm-error {
-  padding: 0.45em;
-  margin-bottom: 0.5em;
-  border-left: 3px solid #d99b00;
-  background: color-mix(in srgb, #d99b00 15%, transparent);
+.vm-result {
+  border: 1px solid var(--SmartThemeBorderColor, #777);
+  border-radius: 6px;
+  padding: 0.45em 0.6em;
+  margin: 0.4em 0;
+  white-space: pre-wrap;
 }
-.vm-error { border-left-color: #d64b4b; background: color-mix(in srgb, #d64b4b 15%, transparent); }
-.vm-actions { display: flex; flex-wrap: wrap; gap: 0.4em; margin: 0.5em 0; }
-.vm-result { border-top: 1px solid var(--SmartThemeBorderColor, #777); padding: 0.45em 0; white-space: pre-wrap; }
-.vm-empty { opacity: 0.75; padding: 0.4em 0; }
+
+.vm-empty {
+  opacity: 0.75;
+  padding: 0.4em 0;
+}

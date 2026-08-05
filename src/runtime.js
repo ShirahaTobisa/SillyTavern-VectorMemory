@@ -543,41 +543,57 @@ function bindEvents() {
 
 function settingsTemplate() {
   return `
-    <section class="vm-settings" data-vector-memory-settings>
-      <div class="vm-warning" data-vm-model-warning hidden>存在其它 embedding 模型的分片，当前配置不会召回它们；如需统一请重建索引。<button type="button" data-vm-action="rebuild">重建索引</button></div>
-      <div class="vm-warning" data-vm-native-warning hidden>检测到 SillyTavern 内置 Chat Vectorization 已启用，建议二选一。</div>
-      <div class="vm-error" data-vm-auto-error hidden>自动巡逻已暂停，请检查 API 配置后手动补录。</div>
-      <label class="vm-switch"><input type="checkbox" data-vm-field="enabled"><span>启用向量记忆</span></label>
-      <fieldset><legend>Embedding</legend>
-        <label>预设<select data-vm-field="preset"><option value="siliconflow">SiliconFlow / 聚合器</option><option value="dashscope">DashScope (Qwen)</option><option value="gemini">Gemini (OpenAI compat)</option></select></label>
-        <label>Base URL<input type="url" data-vm-field="baseUrl" placeholder="https://api.example.com"></label>
-        <label>API Key<input type="password" data-vm-field="apiKey" autocomplete="off"></label>
-        <label>模型<input type="text" data-vm-field="model"></label>
-        <label>维度<input type="number" min="1" data-vm-field="dimensions" placeholder="1024"></label>
-        <label>批量大小<input type="number" min="1" max="16" data-vm-field="batchSize"></label>
-      </fieldset>
-      <fieldset><legend>检索与压缩</legend>
-        <label>相似度阈值 <output data-vm-output="similarityThreshold"></output><input type="range" min="50" max="100" data-vm-field="similarityThreshold"></label>
-        <label>Top K<input type="number" min="10" max="20" data-vm-field="topK"></label>
-        <label>keepFloors（0 关闭）<input type="number" min="0" max="80" step="2" data-vm-field="keepFloors"></label>
-      </fieldset>
-      <fieldset><legend>Rerank</legend>
-        <label class="vm-switch"><input type="checkbox" data-vm-field="rerankEnabled"><span>启用 rerank</span></label>
-        <label>格式<select data-vm-field="rerankApiFormat"><option value="jina">jina</option><option value="dashscope">dashscope</option></select></label>
-        <label>URL<input type="url" data-vm-field="rerankUrl"></label>
-        <label>Key<input type="password" data-vm-field="rerankKey" autocomplete="off"></label>
-        <label>模型<input type="text" data-vm-field="rerankModel"></label>
-        <label>召回阈值 <output data-vm-output="recallThreshold"></output><input type="range" min="30" max="100" data-vm-field="recallThreshold"></label>
-        <label>候选数<input type="number" min="20" max="100" data-vm-field="rerankCandidates"></label>
-        <label>rerank 阈值 <output data-vm-output="rerankThreshold"></output><input type="range" min="0" max="1" step="0.01" data-vm-field="rerankThreshold"></label>
-      </fieldset>
-      <fieldset><legend>维护</legend>
-        <div>当前索引：<span data-vm-stats>0 条 / 0 KB</span> <span data-vm-progress></span></div>
-        <div class="vm-actions"><button type="button" data-vm-action="patrol">立即补录</button><button type="button" data-vm-action="rebuild">重建索引</button><button type="button" data-vm-action="clear">清空索引</button></div>
-        <label>手动检索<input type="search" data-vm-search placeholder="输入要查的事实"><button type="button" data-vm-action="search">检索</button></label>
-        <div data-vm-results></div>
-      </fieldset>
-    </section>`;
+    <div class="vm-settings" data-vector-memory-settings>
+      <div class="inline-drawer">
+        <div class="inline-drawer-toggle inline-drawer-header">
+          <b>向量记忆 Vector Memory</b>
+          <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
+        </div>
+        <div class="inline-drawer-content">
+          <div class="vm-warning" data-vm-model-warning hidden>存在其它 embedding 模型的分片，当前配置不会召回它们；如需统一请重建索引。<button type="button" class="menu_button" data-vm-action="rebuild">重建索引</button></div>
+          <div class="vm-warning" data-vm-native-warning hidden>检测到 SillyTavern 内置 Chat Vectorization 已启用，建议二选一。</div>
+          <div class="vm-error" data-vm-auto-error hidden>自动巡逻已暂停，请检查 API 配置后手动补录。</div>
+          <label class="checkbox_label"><input type="checkbox" data-vm-field="enabled"><span>启用向量记忆</span></label>
+          <h4 class="vm-h">Embedding</h4>
+          <div class="vm-field"><small>预设</small><select class="text_pole" data-vm-field="preset"><option value="siliconflow">SiliconFlow / 聚合器</option><option value="dashscope">DashScope (Qwen)</option><option value="gemini">Gemini (OpenAI compat)</option></select></div>
+          <div class="vm-field"><small>Base URL</small><input class="text_pole" type="text" data-vm-field="baseUrl" placeholder="https://api.example.com"></div>
+          <div class="vm-field"><small>API Key</small><input class="text_pole" type="password" data-vm-field="apiKey" autocomplete="off"></div>
+          <div class="vm-field"><small>模型</small><input class="text_pole" type="text" data-vm-field="model"></div>
+          <div class="vm-grid">
+            <div class="vm-field"><small>维度</small><input class="text_pole" type="number" min="1" data-vm-field="dimensions" placeholder="1024"></div>
+            <div class="vm-field"><small>批量大小</small><input class="text_pole" type="number" min="1" max="16" data-vm-field="batchSize"></div>
+          </div>
+          <h4 class="vm-h">检索与压缩</h4>
+          <div class="vm-field"><small>相似度阈值 <output data-vm-output="similarityThreshold"></output>%</small><input type="range" min="50" max="100" data-vm-field="similarityThreshold"></div>
+          <div class="vm-grid">
+            <div class="vm-field"><small>Top K</small><input class="text_pole" type="number" min="10" max="20" data-vm-field="topK"></div>
+            <div class="vm-field"><small>keepFloors（0 关闭）</small><input class="text_pole" type="number" min="0" max="80" step="2" data-vm-field="keepFloors"></div>
+          </div>
+          <h4 class="vm-h">Rerank</h4>
+          <label class="checkbox_label"><input type="checkbox" data-vm-field="rerankEnabled"><span>启用 rerank</span></label>
+          <div class="vm-grid">
+            <div class="vm-field"><small>格式</small><select class="text_pole" data-vm-field="rerankApiFormat"><option value="jina">jina</option><option value="dashscope">dashscope</option></select></div>
+            <div class="vm-field"><small>模型</small><input class="text_pole" type="text" data-vm-field="rerankModel"></div>
+          </div>
+          <div class="vm-field"><small>URL</small><input class="text_pole" type="text" data-vm-field="rerankUrl"></div>
+          <div class="vm-field"><small>Key</small><input class="text_pole" type="password" data-vm-field="rerankKey" autocomplete="off"></div>
+          <div class="vm-field"><small>召回阈值 <output data-vm-output="recallThreshold"></output>%</small><input type="range" min="30" max="100" data-vm-field="recallThreshold"></div>
+          <div class="vm-grid">
+            <div class="vm-field"><small>候选数</small><input class="text_pole" type="number" min="20" max="100" data-vm-field="rerankCandidates"></div>
+            <div class="vm-field"><small>rerank 阈值 <output data-vm-output="rerankThreshold"></output></small><input type="range" min="0" max="1" step="0.01" data-vm-field="rerankThreshold"></div>
+          </div>
+          <h4 class="vm-h">维护</h4>
+          <div class="vm-stats-row">当前索引：<span data-vm-stats>0 条 / 0.0 KB</span> <span data-vm-progress></span></div>
+          <div class="vm-actions">
+            <button type="button" class="menu_button" data-vm-action="patrol">立即补录</button>
+            <button type="button" class="menu_button" data-vm-action="rebuild">重建索引</button>
+            <button type="button" class="menu_button" data-vm-action="clear">清空索引</button>
+          </div>
+          <div class="vm-search-row"><input class="text_pole" type="search" data-vm-search placeholder="输入要查的事实"><button type="button" class="menu_button" data-vm-action="search">检索</button></div>
+          <div data-vm-results></div>
+        </div>
+      </div>
+    </div>`;
 }
 
 function setFieldValue(element, value) {
