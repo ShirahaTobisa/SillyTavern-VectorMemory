@@ -13,9 +13,38 @@ import {
   quantizeEmbedding,
   decodeQuantizedEmbedding,
   rankVectorCandidates,
+  setStripTagList,
   splitLongMemoryParagraph,
   stripVectorMemoryCode
 } from '../src/pure.js';
+
+test('configured tag blocks, orphan tags and image prompts are stripped', () => {
+  setStripTagList('');
+  const prefillOpened = '这里是残留的思维链内容，模型只输出了闭合标签。\n</think>\n\n正文第一句，应当保留。';
+  const cleanedPrefill = stripVectorMemoryCode(prefillOpened);
+  assert.match(cleanedPrefill, /正文第一句/);
+  assert.doesNotMatch(cleanedPrefill, /思维链内容/);
+
+  const mixed = [
+    '<konatan_planning~>',
+    '- 剧情规划：这段全是场外计划书',
+    '</konatan_planning~>',
+    '正文开始，她转过头。',
+    'image###nsfw, 1girl, golden hair###',
+    '<UpdateVariable>',
+    '<Analysis>- Time passed: 3 min</Analysis>',
+    '<JSONPatch>[{ "op": "replace", "path": "/world/time" }]</JSONPatch>',
+    '</UpdateVariable>',
+    '<正文>故事继续。</正文>',
+    '<konatan_chat>',
+    'Master你好呀，这是被截断的场外聊天'
+  ].join('\n');
+  const cleaned = stripVectorMemoryCode(mixed);
+  assert.match(cleaned, /她转过头/);
+  assert.match(cleaned, /故事继续/);
+  assert.doesNotMatch(cleaned, /计划书|1girl|Time passed|replace|Master你好/);
+  assert.doesNotMatch(cleaned, /<正文>/);
+});
 
 test('cleaning keeps prose and strips code/html', () => {
   const input = [

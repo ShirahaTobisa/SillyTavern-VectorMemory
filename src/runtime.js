@@ -1,6 +1,7 @@
 import {
   MEMORY_MAX_TOP_K,
   MEMORY_MIN_TOP_K,
+  DEFAULT_STRIP_TAGS,
   assembleTurnFragments,
   buildConversationTurns,
   buildRecallPrompt,
@@ -13,6 +14,7 @@ import {
   mergeSameTurnResults,
   quantizeEmbedding,
   rankVectorCandidates,
+  setStripTagList,
   sortByTime,
   stripVectorMemoryCode,
   trimText
@@ -22,6 +24,7 @@ import { requestEmbeddings, requestRerank, requestModelList, normalizeBaseUrl } 
 const DEFAULT_SETTINGS = Object.freeze({
   enabled: false,
   autoPatrol: false,
+  stripTags: '',
   preset: 'siliconflow',
   baseUrl: 'https://api.siliconflow.cn',
   apiKey: '',
@@ -339,6 +342,11 @@ function getSettingsSnapshot() {
   settings.recallThreshold = clampSetting(settings.recallThreshold, 30, 100, 30);
   settings.rerankCandidates = clampSetting(settings.rerankCandidates, 20, 100, 50);
   settings.rerankThreshold = clampSetting(settings.rerankThreshold, 0, 1, 0.35);
+  if (state.appliedStripTags !== settings.stripTags) {
+    setStripTagList(settings.stripTags);
+    state.appliedStripTags = settings.stripTags;
+    state.turnFingerprintCache = new WeakMap();
+  }
   return settings;
 }
 
@@ -608,6 +616,8 @@ function settingsTemplate() {
                 <div class="vm-field"><small>维度</small><input class="text_pole" type="number" min="1" data-vm-field="dimensions" placeholder="1024"></div>
                 <div class="vm-field"><small>批量大小</small><input class="text_pole" type="number" min="1" max="16" data-vm-field="batchSize"></div>
               </div>
+              <div class="vm-field"><small>入库剔除标签（逗号分隔，支持 * 通配；改动后建议重建索引）</small><textarea class="text_pole" rows="2" data-vm-field="stripTags" placeholder="${DEFAULT_STRIP_TAGS}"></textarea></div>
+              <small class="vm-hint">这些标签块（思维链、状态栏、变量更新、选项菜单等）整段不入库；留空 = 用上面的默认表。发现某张卡的怪标签漏进向量，就把标签名加进来（如 konatan_*）。</small>
               <div class="vm-field"><small>相似度阈值 <output data-vm-output="similarityThreshold"></output>%（低于此分数的记忆不召回）</small><input type="range" min="50" max="100" data-vm-field="similarityThreshold"></div>
               <div class="vm-grid">
                 <div class="vm-field"><small>每次注入条数上限</small><input class="text_pole" type="number" min="10" max="20" data-vm-field="topK"></div>
