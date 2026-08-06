@@ -497,14 +497,25 @@ async function patrol(options = {}) {
         }
       } catch (error) {
         if (error?.name === 'AbortError') throw error;
-        failures += 1;
         const message = String(error?.message || '').toLowerCase();
         if (responseIsClientError(error) && /batch|limit|exceed|too many|max(imum)?|数量|上限|超出/.test(message) && batchSize > 1) {
           batchSize = Math.max(1, Math.floor(batchSize / 2));
           continue;
         }
-        if (failures >= 3) throw error;
-        await new Promise(resolve => setTimeout(resolve, 250));
+        failures += 1;
+        // Rate limits get patient exponential backoff instead of a fast fail,
+        // so a long backfill survives provider RPM caps without re-clicking.
+        const rateLimited = Number(error?.status) === 429
+          || /rate ?limit|too many requests|限流|频率|tpm|rpm|qps/.test(message);
+        if (failures >= (rateLimited ? 8 : 3)) throw error;
+        const waitMs = Math.min(20_000, (rateLimited ? 2000 : 500) * (2 ** (failures - 1)));
+        await new Promise((resolve, reject) => {
+          const timer = setTimeout(resolve, waitMs);
+          signal.addEventListener('abort', () => {
+            clearTimeout(timer);
+            reject(Object.assign(new Error('Aborted'), { name: 'AbortError' }));
+          }, { once: true });
+        });
       }
     }
     await saveIndex();
@@ -675,7 +686,16 @@ function readFieldValue(element) {
 }
 
 function estimateIndexSize(index) {
-  try { return new TextEncoder().encode(JSON.stringify({ fragments: index.fragments.map(serializableFragment), emptyTurnFingerprints: index.emptyTurnFingerprints })).length; } catch (_) { return JSON.stringify(index).length; }
+  // Arithmetic estimate (CJK ≈ 3 bytes/char) instead of stringifying the whole
+  // index on every UI refresh — a multi-MB index made that noticeably slow.
+  let bytes = 0;
+  index.fragments.forEach(fragment => {
+    bytes += (fragment.embeddingQ?.length || 0) + 300;
+    bytes += ((fragment.paragraph?.length || 0) + (fragment.summary?.length || 0) + (fragment.sourceText?.length || 0)) * 3;
+    bytes += ((fragment.contentFingerprint?.length || 0) + (fragment.turnFingerprint?.length || 0)) * 3;
+  });
+  index.emptyTurnFingerprints.forEach(value => { bytes += String(value).length * 3; });
+  return bytes;
 }
 
 function ensureSelectOption(select, value) {
@@ -882,15 +902,13 @@ export async function vectorMemoryInterceptor(chat, contextSize, abort, type) {
   if (context.characterId === undefined) return;
   const index = ensureRuntimeIndex();
   if (index.fragments.length === 0) return;
-  const signal = abort?.signal || abort;
 
   // Only splice the prompt array. Existing chat message objects are never
   // edited, because ST writes those objects back to the chat file.
   const removedFloors = applyKeepFloors(chat, index, settings.keepFloors);
-  if (signal?.aborted) return;
   warnModelMismatch(index, settings);
   try {
-    const selected = await retrieveMemories(chat, index, settings, signal);
+    const selected = await retrieveMemories(chat, index, settings);
     const scores = selected.map(item => Number(item.rerankScore ?? item.score ?? 0));
     state.lastRecall = {
       at: Date.now(),
