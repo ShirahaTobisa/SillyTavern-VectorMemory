@@ -228,19 +228,25 @@ function buildTurnFingerprintSet(chat, keepFloors) {
 
 function applyKeepFloors(chat, index, keepFloors) {
   const keep = Number(keepFloors) || 0;
-  if (!Array.isArray(chat) || keep <= 0 || chat.length <= keep) return 0;
+  if (!Array.isArray(chat) || keep <= 0 || chat.length <= keep) return { removed: 0, oldTurns: 0, covered: 0 };
   const start = chat.length - keep;
   const covered = new Set(index.fragments.map(fragment => fragment.turnFingerprint).filter(Boolean));
   const empty = new Set(index.emptyTurnFingerprints.filter(Boolean));
   const remove = new Set();
+  let oldTurns = 0;
+  let coveredTurns = 0;
   buildConversationTurns(chat).forEach(turn => {
     const indexes = turn.messageIndexes || [];
     if (indexes.length === 0 || indexes.some(indexValue => indexValue >= start)) return;
+    oldTurns += 1;
     const marker = getTurnMarker(turn);
-    if (covered.has(marker) || empty.has(marker)) indexes.forEach(indexValue => remove.add(indexValue));
+    if (covered.has(marker) || empty.has(marker)) {
+      coveredTurns += 1;
+      indexes.forEach(indexValue => remove.add(indexValue));
+    }
   });
   [...remove].sort((a, b) => b - a).forEach(indexValue => chat.splice(indexValue, 1));
-  return remove.size;
+  return { removed: remove.size, oldTurns, covered: coveredTurns };
 }
 
 function isAllowedGenerationType(type) {
@@ -729,7 +735,7 @@ function refreshUI() {
     const detail = recall.count > 0
       ? `注入 ${recall.count} 条（轮 ${[...new Set(recall.turns)].join(',')}｜分 ${recall.scoreRange}）`
       : '注入 0 条（无匹配或低于阈值）';
-    lastRecallElement.textContent = `${new Date(recall.at).toLocaleTimeString()} ${detail}，压缩 ${recall.removedFloors} 楼`;
+    lastRecallElement.textContent = `${new Date(recall.at).toLocaleTimeString()} ${detail}，压缩 ${recall.removedFloors} 楼（保留区外已覆盖 ${recall.coverage} 轮）`;
   }
   warnModelMismatch(index, settings);
 }
@@ -887,7 +893,8 @@ export async function vectorMemoryInterceptor(chat, contextSize, abort, type) {
       count: selected.length,
       turns: selected.map(item => Number(item.memory?.turn) || 0),
       scoreRange: scores.length ? `${Math.min(...scores).toFixed(2)}~${Math.max(...scores).toFixed(2)}` : '',
-      removedFloors
+      removedFloors: removedFloors.removed,
+      coverage: `${removedFloors.covered}/${removedFloors.oldTurns}`
     };
     console.info('[VectorMemory] recall', state.lastRecall, selected.map(item => ({
       turn: item.memory?.turn,
