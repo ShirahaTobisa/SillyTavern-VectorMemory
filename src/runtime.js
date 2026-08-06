@@ -718,7 +718,11 @@ function refreshUI() {
   const index = ensureRuntimeIndex();
   const bytes = estimateIndexSize(index);
   const stats = state.ui.querySelector('[data-vm-stats]');
-  if (stats) stats.textContent = `${index.fragments.length} 条 / ${(bytes / 1024).toFixed(1)} KB`;
+  if (stats) {
+    const totalTurns = buildConversationTurns(getChat(), { includeHidden: true }).length;
+    const coveredTurns = new Set(index.fragments.map(f => Number(f.turn) || 0).filter(t => t > 0)).size;
+    stats.textContent = `${index.fragments.length} 条 / ${(bytes / 1024).toFixed(1)} KB，覆盖 ${coveredTurns}/${totalTurns} 轮`;
+  }
   const autoError = state.ui.querySelector('[data-vm-auto-error]');
   if (autoError) autoError.hidden = !state.autoError;
   const patrolButton = state.ui.querySelector('[data-vm-action="patrol"]');
