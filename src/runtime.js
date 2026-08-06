@@ -402,7 +402,7 @@ async function patrol(options = {}) {
   state.patrolAbort = new AbortController();
   refreshUI();
   const signal = state.patrolAbort.signal;
-  const turns = buildConversationTurns(chat);
+  const turns = buildConversationTurns(chat, { includeHidden: true });
   const settledTurns = options.full ? turns : turns.slice(0, Math.max(0, turns.length - 2));
   // Auto patrol only ingests the most recently settled turns; sweeping the
   // whole history is manual-only (user decision — RPH rescans everything).
@@ -813,7 +813,7 @@ function bindUI() {
   // deletable.
   state.ui.querySelector('[data-vm-action="trim"]')?.addEventListener('click', async () => {
     const index = ensureRuntimeIndex();
-    const maxTurn = buildConversationTurns(getChat()).length;
+    const maxTurn = buildConversationTurns(getChat(), { includeHidden: true }).length;
     const doomed = index.fragments.filter(fragment => Number(fragment.turn) > maxTurn);
     if (doomed.length === 0) {
       showToast(`没有未来分片（当前对话共 ${maxTurn} 轮）`, 'info');

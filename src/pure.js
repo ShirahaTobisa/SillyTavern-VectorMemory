@@ -186,16 +186,19 @@ export function mergeSmallMemoryParagraphs(paragraphs, maxLength = MEMORY_MERGE_
   return merged;
 }
 
-export function buildConversationTurns(messages) {
+export function buildConversationTurns(messages, { includeHidden = false } = {}) {
   const turns = [];
   let current = null;
   let sawUser = false;
   let turn = 0;
 
   (Array.isArray(messages) ? messages : []).forEach((message, index) => {
-    if (!message || message.is_system === true || message.extra?.vector_memory_injected === true) return;
+    if (!message || message.extra?.vector_memory_injected === true) return;
+    // Hidden (is_system) floors are excluded from the prompt by ST itself, but
+    // they are exactly what belongs in vector memory — extraction passes
+    // includeHidden: true, prompt-side compression keeps the default.
+    if (message.is_system === true && !includeHidden) return;
     const isUser = message.is_user === true || message.role === 'user';
-    const isAssistant = !isUser && (message.role === 'assistant' || message.is_system !== true);
 
     if (isUser) {
       if (current) turns.push(current);
@@ -208,7 +211,7 @@ export function buildConversationTurns(messages) {
     }
 
     // A first assistant message is the opening message and belongs to turn 0.
-    if (!sawUser || !isAssistant || !current) return;
+    if (!sawUser || !current) return;
     current.messages.push(message);
     current.messageIndexes.push(index);
   });
