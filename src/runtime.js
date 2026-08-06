@@ -10,7 +10,7 @@ import {
   cleanMessageText,
   decodeQuantizedEmbedding,
   getContentFingerprint,
-  getTurnFingerprint,
+  getRawTurnFingerprint,
   mergeSameTurnResults,
   quantizeEmbedding,
   rankVectorCandidates,
@@ -60,7 +60,6 @@ const state = {
   patrolRunning: false,
   chatRef: null,
   runtimeIndex: null,
-  turnFingerprintCache: new WeakMap(),
   rerankWarned: false,
   dimsMismatchWarned: false,
   modelMismatchWarned: false,
@@ -126,14 +125,41 @@ function readPersistedIndex() {
 
 function hydrateIndex() {
   const persisted = readPersistedIndex();
-  state.runtimeIndex = {
-    fragments: persisted.fragments.map(fragment => ({
-      ...fragment,
-      embedding: decodeQuantizedEmbedding(fragment.embeddingQ)
-    })),
-    emptyTurnFingerprints: [...new Set(persisted.emptyTurnFingerprints.filter(Boolean))]
-  };
+  // One-time free migration: legacy fragments predate rawTurnFingerprint, so
+  // stamp it from the live chat by turn number. Pure local computation — no
+  // embedding calls, no re-recording.
+  const rawByTurn = new Map(
+    buildConversationTurns(getChat(), { includeHidden: true })
+      .map(turn => [Number(turn.turn), getRawTurnFingerprint(turn)])
+  );
+  let migrated = false;
+  const fragments = persisted.fragments.map(fragment => {
+    const copy = { ...fragment, embedding: decodeQuantizedEmbedding(fragment.embeddingQ) };
+    if (!copy.rawTurnFingerprint) {
+      const raw = rawByTurn.get(Number(copy.turn)) || '';
+      if (raw) {
+        copy.rawTurnFingerprint = raw;
+        migrated = true;
+      }
+    }
+    return copy;
+  });
+  const emptyTurnFingerprints = [...new Set(persisted.emptyTurnFingerprints.filter(Boolean).map(value => {
+    const legacy = /^empty:(\d+)$/.exec(String(value));
+    if (!legacy) return value;
+    const raw = rawByTurn.get(Number(legacy[1]));
+    if (raw) {
+      migrated = true;
+      return raw;
+    }
+    return value;
+  }))];
+  state.runtimeIndex = { fragments, emptyTurnFingerprints };
   state.modelMismatchWarned = false;
+  if (migrated) {
+    console.info('[VectorMemory] index migrated to raw turn fingerprints (no re-embedding needed)');
+    saveIndex().catch(error => console.warn('[VectorMemory] migration save failed', error));
+  }
   return state.runtimeIndex;
 }
 
@@ -141,7 +167,6 @@ function ensureRuntimeIndex() {
   const chat = getChat();
   if (state.chatRef !== chat || !state.runtimeIndex) {
     state.chatRef = chat;
-    state.turnFingerprintCache = new WeakMap();
     return hydrateIndex();
   }
   return state.runtimeIndex;
@@ -174,36 +199,10 @@ function makeId() {
   return `vm-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
 }
 
-function messageFingerprintCache(message) {
-  if (!message || typeof message !== 'object') return '';
-  const value = message.mes ?? message.content ?? '';
-  const cached = state.turnFingerprintCache.get(message);
-  if (cached && cached.value === value) return cached.fingerprint;
-  const turn = { messages: [message] };
-  const fingerprint = getTurnFingerprint(turn);
-  state.turnFingerprintCache.set(message, { value, fingerprint });
-  return fingerprint;
-}
-
-function cachedTurnFingerprint(turn) {
-  // The turn fingerprint is cheap for the normal one-user/one-assistant case,
-  // while the per-message cache prevents repeated cleaning during compression.
-  const parts = [];
-  (turn?.messages || []).forEach(message => {
-    const clean = cleanMessageText(message);
-    if (!clean) return;
-    const marker = message.is_user === true || message.role === 'user' ? '用户：' : '角色卡：';
-    parts.push(`${marker}${clean}`);
-    messageFingerprintCache(message);
-  });
-  // getTurnFingerprint adds a role marker to objects, so compute directly via
-  // a temporary user/assistant shaped turn to preserve the exact labels.
-  const source = parts.join('\n').replace(/\s+/g, '').replace(/[，。、“”‘’：；！？,.!?;:"'`~]/g, '');
-  return source.length >= 80 ? source.slice(0, 1000) : '';
-}
-
 function getTurnMarker(turn) {
-  const fingerprint = cachedTurnFingerprint(turn);
+  // Raw-text fingerprint: independent of the cleaning rules, so strip-tag
+  // changes never invalidate coverage. Message edits still do.
+  const fingerprint = getRawTurnFingerprint(turn);
   return fingerprint || `empty:${Number(turn?.turn) || 0}`;
 }
 
@@ -222,7 +221,7 @@ function applyKeepFloors(chat, index, keepFloors) {
   const keep = Number(keepFloors) || 0;
   if (!Array.isArray(chat) || keep <= 0 || chat.length <= keep) return { removed: 0, oldTurns: 0, covered: 0 };
   const start = chat.length - keep;
-  const covered = new Set(index.fragments.map(fragment => fragment.turnFingerprint).filter(Boolean));
+  const covered = new Set(index.fragments.map(fragment => fragment.rawTurnFingerprint).filter(Boolean));
   const empty = new Set(index.emptyTurnFingerprints.filter(Boolean));
   const remove = new Set();
   let oldTurns = 0;
@@ -358,7 +357,6 @@ function getSettingsSnapshot() {
   if (state.appliedStripTags !== settings.stripTags) {
     setStripTagList(settings.stripTags);
     state.appliedStripTags = settings.stripTags;
-    state.turnFingerprintCache = new WeakMap();
   }
   return settings;
 }
@@ -418,8 +416,7 @@ async function patrol(options = {}) {
   const fragmentItems = [];
 
   eligibleTurns.forEach(turn => {
-    const turnFingerprint = getTurnFingerprint(turn);
-    const marker = turnFingerprint || `empty:${turn.turn}`;
+    const marker = getTurnMarker(turn);
     const cleanHasContent = turn.messages.some(message => Boolean(cleanMessageText(message)));
     const fragments = assembleTurnFragments(turn, {
       userName: context.name1 || context.userName || '用户',
@@ -440,9 +437,13 @@ async function patrol(options = {}) {
     });
     fragments.forEach(fragment => {
       const existing = existingByChunk.get(fragment.vectorChunkId);
-      // A changed turn keeps the structural chunk id but gets a new
-      // turn/content fingerprint, so it must be embedded again.
-      if (existing && existing.turnFingerprint === fragment.turnFingerprint) return;
+      // Same structural slot + same RAW turn content = already recorded.
+      // Cleaning-rule changes alone no longer trigger re-embedding; an
+      // explicit rebuild is the way to re-clean stored text.
+      if (existing && (
+        (existing.rawTurnFingerprint && existing.rawTurnFingerprint === fragment.rawTurnFingerprint)
+        || (!existing.rawTurnFingerprint && existing.turnFingerprint === fragment.turnFingerprint)
+      )) return;
       if (fragment.contentFingerprint && (existingFingerprints.has(fragment.contentFingerprint) || pendingFingerprints.has(fragment.contentFingerprint))) return;
       if (fragment.contentFingerprint) pendingFingerprints.add(fragment.contentFingerprint);
       fragmentItems.push({ fragment, turn });
@@ -473,6 +474,7 @@ async function patrol(options = {}) {
             timestamp: Date.now(),
             turn: item.fragment.turn,
             turnFingerprint: item.fragment.turnFingerprint,
+            rawTurnFingerprint: item.fragment.rawTurnFingerprint,
             summary: item.fragment.summary,
             paragraph: item.fragment.paragraph,
             sourceText: item.fragment.sourceText,
@@ -567,7 +569,6 @@ function schedulePatrol(delay, options = {}) {
 function resetRuntimeForChat() {
   state.chatRef = null;
   state.runtimeIndex = null;
-  state.turnFingerprintCache = new WeakMap();
   state.rerankWarned = false;
   state.dimsMismatchWarned = false;
   state.modelMismatchWarned = false;
@@ -643,7 +644,7 @@ function settingsTemplate() {
                 <div class="vm-field"><small>维度（留空=自动，用模型原生维度）</small><input class="text_pole" type="number" min="1" data-vm-field="dimensions" placeholder="自动"></div>
                 <div class="vm-field"><small>批量大小</small><input class="text_pole" type="number" min="1" max="16" data-vm-field="batchSize"></div>
               </div>
-              <div class="vm-field"><small>入库剔除标签（逗号分隔，支持 * 通配；改动后建议重建索引）</small><textarea class="text_pole" rows="2" data-vm-field="stripTags" placeholder="${DEFAULT_STRIP_TAGS}"></textarea></div>
+              <div class="vm-field"><small>入库剔除标签（逗号分隔，支持 * 通配；改动只影响之后的新入库，不影响已有索引）</small><textarea class="text_pole" rows="2" data-vm-field="stripTags" placeholder="${DEFAULT_STRIP_TAGS}"></textarea></div>
               <div class="vm-actions"><button type="button" class="menu_button" data-vm-action="suggest-tags">AI 识别剔除标签（用当前主模型）</button></div>
               <small class="vm-hint">这些标签块（思维链、状态栏、变量更新、选项菜单等）整段不入库；留空 = 用上面的默认表。「AI 识别」会把最近的 AI 消息发给你酒馆当前连接的模型分析一次，识别出的标签自动并入列表。</small>
               <div class="vm-field"><small>相似度阈值 <output data-vm-output="similarityThreshold"></output>%（低于此分数的记忆不召回）</small><input type="range" min="50" max="100" data-vm-field="similarityThreshold"></div>
@@ -846,7 +847,7 @@ async function suggestStripTags(button) {
     settings.stripTags = [...existing, ...fresh].join(', ');
     saveSettings();
     refreshUI();
-    showToast(`已加入剔除列表：${fresh.join(', ')}（改动清洗规则后建议重建索引）`, 'success');
+    showToast(`已加入剔除列表：${fresh.join(', ')}（只影响之后的新入库，已有索引不受影响）`, 'success');
   } catch (error) {
     showToast(`标签分析失败：${error?.message || error}`, 'error');
   } finally {

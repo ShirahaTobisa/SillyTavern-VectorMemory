@@ -231,6 +231,35 @@ export function getTurnFingerprint(turnInfo) {
   return normalized.length >= 80 ? normalized.slice(0, 1000) : '';
 }
 
+function fnv1a(text) {
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < text.length; i += 1) {
+    hash ^= text.charCodeAt(i);
+    hash = Math.imul(hash, 0x01000193) >>> 0;
+  }
+  return hash >>> 0;
+}
+
+/**
+ * Coverage fingerprint over the RAW message text, deliberately independent of
+ * the cleaning rules: editing a message still invalidates it, but changing the
+ * strip-tag list never does — so an existing index survives rule changes
+ * without re-embedding. Stored as a short hash (equality token only).
+ */
+export function getRawTurnFingerprint(turnInfo) {
+  const parts = [];
+  (turnInfo?.messages || []).forEach(message => {
+    const text = String(message?.mes ?? message?.content ?? '').trim();
+    if (!text) return;
+    const label = message.is_user === true || message.role === 'user' ? '用户：' : '角色卡：';
+    parts.push(`${label}${text}`);
+  });
+  const normalized = normalizeFingerprintText(parts.join('\n'));
+  if (normalized.length < 80) return '';
+  const prefix = normalized.slice(0, 1000);
+  return `rfp1:${prefix.length.toString(36)}:${fnv1a(prefix).toString(36)}${fnv1a(`${prefix.length}:${prefix}`).toString(36)}`;
+}
+
 export function normalizeFingerprintText(text) {
   return String(text || '').replace(/\s+/g, '').replace(CONTENT_PUNCTUATION, '');
 }
@@ -297,6 +326,7 @@ export function assembleTurnFragments(turnInfo, options = {}) {
     : userBlocks.map(block => ({ ...block, text: `用户：${block.text}` }));
 
   const turnFingerprint = getTurnFingerprint(turnInfo);
+  const rawTurnFingerprint = getRawTurnFingerprint(turnInfo);
   return sourceBlocks.map((block, index) => {
     const includeUser = roleBlocks.length > 0 && Boolean(userLine);
     const paragraph = [includeUser ? userLine : '', block.text].filter(Boolean).join('\n');
@@ -314,6 +344,7 @@ export function assembleTurnFragments(turnInfo, options = {}) {
       sourceText: [`第 ${turn || '?' } 轮`, paragraph].filter(Boolean).join('\n'),
       vectorChunkId: `${turn || 0}:${idParts}`,
       turnFingerprint,
+      rawTurnFingerprint,
       contentFingerprint: getContentFingerprint(paragraph)
     };
   });
@@ -447,7 +478,8 @@ export function rankVectorCandidates(memories, queryVector, queryText, options =
   (Array.isArray(memories) ? memories : []).forEach(memory => {
     if (memory?.enabled === false) return;
     if (options.model && memory.embeddingModel && memory.embeddingModel !== options.model) return;
-    if (memory?.turnFingerprint && excludedTurnFingerprints.has(memory.turnFingerprint)) return;
+    const turnToken = memory?.rawTurnFingerprint || memory?.turnFingerprint;
+    if (turnToken && excludedTurnFingerprints.has(turnToken)) return;
     const vector = memory.embedding || decodeQuantizedEmbedding(memory.embeddingQ);
     const raw = cosineSimilarity(queryVector, vector);
     if (!Number.isFinite(raw) || raw <= -1 || raw < threshold) return;
@@ -503,8 +535,10 @@ export function mergeSameTurnResults(scoredItems, turns = []) {
 
   const turnByFingerprint = new Map();
   (Array.isArray(turns) ? turns : []).forEach(turn => {
-    const fp = getTurnFingerprint(turn);
+    const fp = getRawTurnFingerprint(turn);
     if (fp) turnByFingerprint.set(fp, turn);
+    const legacyFp = getTurnFingerprint(turn);
+    if (legacyFp) turnByFingerprint.set(legacyFp, turn);
   });
   const mergedTurns = new Set();
   const result = [];
@@ -518,7 +552,7 @@ export function mergeSameTurnResults(scoredItems, turns = []) {
     mergedTurns.add(turn);
     const group = groups.get(turn) || [item];
     const best = [...group].sort((a, b) => (Number(b.score) || 0) - (Number(a.score) || 0))[0] || item;
-    const currentTurn = turnByFingerprint.get(best.memory?.turnFingerprint);
+    const currentTurn = turnByFingerprint.get(best.memory?.rawTurnFingerprint || best.memory?.turnFingerprint);
     let text = buildFullTurnText(currentTurn);
     if (!text) {
       const userParts = [];
