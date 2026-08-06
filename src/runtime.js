@@ -28,8 +28,8 @@ const DEFAULT_SETTINGS = Object.freeze({
   preset: 'siliconflow',
   baseUrl: 'https://api.siliconflow.cn',
   apiKey: '',
-  model: 'Qwen/Qwen3-Embedding-8B',
-  dimensions: 1024,
+  model: '',
+  dimensions: '',
   batchSize: 8,
   similarityThreshold: 50,
   topK: 10,
@@ -38,25 +38,16 @@ const DEFAULT_SETTINGS = Object.freeze({
   rerankApiFormat: 'jina',
   rerankUrl: '',
   rerankKey: '',
-  rerankModel: 'Qwen/Qwen3-Reranker-8B',
+  rerankModel: '',
   recallThreshold: 30,
   rerankCandidates: 50,
   rerankThreshold: 0.35
 });
 
 const PRESETS = {
-  siliconflow: {
-    baseUrl: 'https://api.siliconflow.cn',
-    model: 'Qwen/Qwen3-Embedding-8B'
-  },
-  dashscope: {
-    baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
-    model: 'text-embedding-v4'
-  },
-  gemini: {
-    baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai',
-    model: 'gemini-embedding-001'
-  }
+  siliconflow: { baseUrl: 'https://api.siliconflow.cn' },
+  dashscope: { baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1' },
+  gemini: { baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai' }
 };
 
 const state = {
@@ -71,6 +62,7 @@ const state = {
   runtimeIndex: null,
   turnFingerprintCache: new WeakMap(),
   rerankWarned: false,
+  dimsMismatchWarned: false,
   modelMismatchWarned: false,
   largeIndexWarned: false,
   autoError: false,
@@ -294,7 +286,14 @@ async function retrieveMemories(chat, index, settings, abortSignal) {
     : clampSetting(settings.similarityThreshold, 50, 100, 50);
   const queryText = `当前问题：用户：${query}`;
   const [queryVector] = await requestEmbeddings([queryText], settings, { signal: abortSignal });
-  const scored = rankVectorCandidates(candidates, queryVector, query, {
+  // Dimension guard: with dimensions on auto, a provider/model switch can
+  // change native dims; scoring across different dims is silent garbage.
+  const dimsMatched = candidates.filter(fragment => !fragment.embeddingDims || fragment.embeddingDims === queryVector.length);
+  if (dimsMatched.length !== candidates.length && !state.dimsMismatchWarned) {
+    state.dimsMismatchWarned = true;
+    showToast(`有 ${candidates.length - dimsMatched.length} 条分片与当前 embedding 维度（${queryVector.length}）不一致，已跳过；如需统一请重建索引`, 'warning');
+  }
+  const scored = rankVectorCandidates(dimsMatched, queryVector, query, {
     threshold,
     model: settings.model,
     excludedTurnFingerprints: excluded
@@ -304,7 +303,12 @@ async function retrieveMemories(chat, index, settings, abortSignal) {
     ? clampSetting(settings.rerankCandidates, 20, 100, 50)
     : topK);
 
-  if (settings.rerankEnabled && selected.length > 0) {
+  if (settings.rerankEnabled && !String(settings.rerankModel || '').trim()) {
+    if (!state.rerankWarned) {
+      state.rerankWarned = true;
+      showToast('未选择 rerank 模型，已跳过 rerank（点「获取模型」后在高级设置里选择）', 'warning');
+    }
+  } else if (settings.rerankEnabled && selected.length > 0) {
     try {
       const reranked = await requestRerank(query, selected.map(item => item.memory.summary || item.memory.paragraph || ''), {
         rerankApiFormat: settings.rerankApiFormat,
@@ -376,6 +380,7 @@ async function patrol(options = {}) {
   const settings = getSettingsSnapshot();
   const say = (message) => { if (options.interactive) showToast(message, 'warning'); };
   if (!settings.enabled) { say('请先勾选「启用向量记忆」'); return 0; }
+  if (!String(settings.model || '').trim()) { say('请先点「获取模型」选择 embedding 模型'); return 0; }
   if (!options.interactive && !settings.autoPatrol) return 0;
   if (state.patrolRunning) { say('补录已在进行中'); return 0; }
   if (isGenerationActive()) {
@@ -564,6 +569,7 @@ function resetRuntimeForChat() {
   state.runtimeIndex = null;
   state.turnFingerprintCache = new WeakMap();
   state.rerankWarned = false;
+  state.dimsMismatchWarned = false;
   state.modelMismatchWarned = false;
   state.largeIndexWarned = false;
   state.autoError = false;
@@ -634,11 +640,12 @@ function settingsTemplate() {
             </div>
             <div class="inline-drawer-content">
               <div class="vm-grid">
-                <div class="vm-field"><small>维度</small><input class="text_pole" type="number" min="1" data-vm-field="dimensions" placeholder="1024"></div>
+                <div class="vm-field"><small>维度（留空=自动，用模型原生维度）</small><input class="text_pole" type="number" min="1" data-vm-field="dimensions" placeholder="自动"></div>
                 <div class="vm-field"><small>批量大小</small><input class="text_pole" type="number" min="1" max="16" data-vm-field="batchSize"></div>
               </div>
               <div class="vm-field"><small>入库剔除标签（逗号分隔，支持 * 通配；改动后建议重建索引）</small><textarea class="text_pole" rows="2" data-vm-field="stripTags" placeholder="${DEFAULT_STRIP_TAGS}"></textarea></div>
-              <small class="vm-hint">这些标签块（思维链、状态栏、变量更新、选项菜单等）整段不入库；留空 = 用上面的默认表。发现某张卡的怪标签漏进向量，就把标签名加进来（如 konatan_*）。</small>
+              <div class="vm-actions"><button type="button" class="menu_button" data-vm-action="suggest-tags">AI 识别剔除标签（用当前主模型）</button></div>
+              <small class="vm-hint">这些标签块（思维链、状态栏、变量更新、选项菜单等）整段不入库；留空 = 用上面的默认表。「AI 识别」会把最近的 AI 消息发给你酒馆当前连接的模型分析一次，识别出的标签自动并入列表。</small>
               <div class="vm-field"><small>相似度阈值 <output data-vm-output="similarityThreshold"></output>%（低于此分数的记忆不召回）</small><input type="range" min="50" max="100" data-vm-field="similarityThreshold"></div>
               <div class="vm-grid">
                 <div class="vm-field"><small>每次注入条数上限</small><input class="text_pole" type="number" min="10" max="20" data-vm-field="topK"></div>
@@ -789,6 +796,64 @@ function escapeHtml(value) {
   return String(value || '').replace(/[&<>"']/g, character => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' }[character]));
 }
 
+async function suggestStripTags(button) {
+  const context = getContext();
+  if (typeof context.generateRaw !== 'function') {
+    showToast('当前酒馆版本的 getContext 没有 generateRaw，无法用主模型分析', 'error');
+    return;
+  }
+  const sample = getChat()
+    .filter(message => message?.is_user !== true && message?.extra?.vector_memory_injected !== true)
+    .slice(-2)
+    .map(message => String(message.mes || ''))
+    .join('\n\n')
+    .slice(0, 12000);
+  if (!sample.trim()) {
+    showToast('当前聊天还没有可分析的 AI 消息', 'warning');
+    return;
+  }
+  const settings = getSettingsSnapshot();
+  try {
+    if (button) button.disabled = true;
+    const reply = await context.generateRaw({
+      prompt: [
+        '下面是角色扮演前端里 AI 消息的原文。除故事正文外，消息里常有 XML 风格标签包裹的非正文块：思维链/规划、状态栏、变量更新、事件进度、选项菜单、场外聊天、生图提示等。',
+        '请列出所有【包裹非正文内容】的标签名，输出一行逗号分隔的标签名，不要输出任何其他文字。',
+        '只包裹故事正文的标签（如 正文、content）不要列入；如果没有非正文标签，输出 NONE。',
+        '原文：',
+        '```',
+        sample,
+        '```'
+      ].join('\n'),
+      systemPrompt: '你是文本结构分析器，只输出要求的标签名列表。'
+    });
+    const found = [...new Set(String(reply || '')
+      .split(/[,，、\s]+/)
+      .map(token => token.trim().replace(/^<\/?|\/?>$/g, ''))
+      .filter(token => token && token.toLowerCase() !== 'none' && /^[\w~*\-一-鿿]{1,30}$/.test(token)))];
+    if (found.length === 0) {
+      showToast('主模型没有识别出需要剔除的标签', 'info');
+      return;
+    }
+    const current = String(settings.stripTags || '').trim() || DEFAULT_STRIP_TAGS;
+    const existing = current.split(/[,，\n]+/).map(entry => entry.trim()).filter(Boolean);
+    const known = new Set(existing.map(entry => entry.toLowerCase()));
+    const fresh = found.filter(tag => !known.has(tag.toLowerCase()));
+    if (fresh.length === 0) {
+      showToast(`识别出 ${found.length} 个标签，均已在剔除列表中`, 'info');
+      return;
+    }
+    settings.stripTags = [...existing, ...fresh].join(', ');
+    saveSettings();
+    refreshUI();
+    showToast(`已加入剔除列表：${fresh.join(', ')}（改动清洗规则后建议重建索引）`, 'success');
+  } catch (error) {
+    showToast(`标签分析失败：${error?.message || error}`, 'error');
+  } finally {
+    if (button) button.disabled = false;
+  }
+}
+
 function bindUI() {
   if (state.ui) return;
   const host = document.querySelector('#extensions_settings, #extensions_settings2');
@@ -805,7 +870,6 @@ function bindUI() {
       if (key === 'preset' && PRESETS[value]) {
         settings.preset = value;
         settings.baseUrl = PRESETS[value].baseUrl;
-        settings.model = PRESETS[value].model;
         saveSettings();
         refreshUI();
       } else {
@@ -888,6 +952,7 @@ function bindUI() {
       button.disabled = false;
     }
   });
+  state.ui.querySelector('[data-vm-action="suggest-tags"]')?.addEventListener('click', event => suggestStripTags(event.currentTarget));
   state.ui.querySelector('[data-vm-action="search"]')?.addEventListener('click', () => manualSearch(state.ui.querySelector('[data-vm-search]')?.value || ''));
   state.ui.querySelector('[data-vm-search]')?.addEventListener('keydown', event => {
     if (event.key === 'Enter') manualSearch(event.currentTarget.value);
