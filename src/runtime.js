@@ -498,15 +498,16 @@ async function patrol(options = {}) {
       } catch (error) {
         if (error?.name === 'AbortError') throw error;
         const message = String(error?.message || '').toLowerCase();
-        if (responseIsClientError(error) && /batch|limit|exceed|too many|max(imum)?|数量|上限|超出/.test(message) && batchSize > 1) {
+        // Rate-limit detection must run before the batch-size check: 429
+        // messages usually contain the word "limit" and shrinking the batch
+        // (= more requests) is exactly the wrong remedy for them.
+        const rateLimited = Number(error?.status) === 429
+          || /rate ?limit|too many requests|限流|频率|tpm|rpm|qps/.test(message);
+        if (!rateLimited && responseIsClientError(error) && /batch|limit|exceed|too many|max(imum)?|数量|上限|超出/.test(message) && batchSize > 1) {
           batchSize = Math.max(1, Math.floor(batchSize / 2));
           continue;
         }
         failures += 1;
-        // Rate limits get patient exponential backoff instead of a fast fail,
-        // so a long backfill survives provider RPM caps without re-clicking.
-        const rateLimited = Number(error?.status) === 429
-          || /rate ?limit|too many requests|限流|频率|tpm|rpm|qps/.test(message);
         if (failures >= (rateLimited ? 8 : 3)) throw error;
         const waitMs = Math.min(20_000, (rateLimited ? 2000 : 500) * (2 ** (failures - 1)));
         await new Promise((resolve, reject) => {
