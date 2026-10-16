@@ -408,7 +408,7 @@ async function patrol(options = {}) {
   const turns = buildConversationTurns(chat, { includeHidden: true });
   const settledTurns = options.full ? turns : turns.slice(0, Math.max(0, turns.length - 2));
   // Auto patrol only ingests the most recently settled turns; sweeping the
-  // whole history is manual-only (user decision — RPH rescans everything).
+  // whole history is manual-only (user decision).
   const eligibleTurns = (options.interactive || options.full) ? settledTurns : settledTurns.slice(-3);
   const existingByChunk = new Map(index.fragments.map(fragment => [fragment.vectorChunkId, fragment]));
   const existingFingerprints = new Set(index.fragments.map(fragment => fragment.contentFingerprint || getContentFingerprint(fragment.paragraph)).filter(Boolean));
@@ -898,7 +898,7 @@ function bindUI() {
     await patrol({ interactive: true, full: true });
   };
   state.ui.querySelectorAll('[data-vm-action="rebuild"]').forEach(button => button.addEventListener('click', rebuild));
-  // Same semantics as RPH 1.7.9 story branches: trim by turn number, never by
+  // Trim by turn number, never by
   // fingerprint — a cleaning-rule change must not make the whole index look
   // deletable.
   state.ui.querySelector('[data-vm-action="trim"]')?.addEventListener('click', async () => {

@@ -56,7 +56,7 @@ export function trimText(text, maxLength) {
 }
 
 /**
- * Keep this order in sync with the RPH implementation. It is deliberately
+ * Keep this order stable. It is deliberately
  * conservative about ordinary prose and aggressive about executable markup.
  */
 export function stripVectorMemoryCode(text) {

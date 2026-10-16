@@ -106,7 +106,7 @@ test('content fingerprint and dedupe are idempotent', () => {
   assert.equal(twice.length, 1);
 });
 
-test('lexical boost and score ordering follow RPH rules', () => {
+test('lexical boost and score ordering follow the fixed rules', () => {
   const terms = ['记忆', 'qwen'];
   const lexical = lexicalBoost({ sourceText: '记忆 qwen', summary: '' }, terms);
   assert.equal(lexical.hits, 2);

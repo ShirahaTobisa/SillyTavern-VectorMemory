@@ -1,4 +1,4 @@
-# Vector Memory (RPH)
+# Vector Memory
 
 SillyTavern 1.18.0 的第三方向量记忆扩展。它把稳定滞后的对话轮清洗、分段、量化入库，并在生成前通过 embedding + lexical boost（可选 rerank）召回相关历史，再用 `keepFloors` 从本次 prompt 中置换已覆盖的旧轮。
 

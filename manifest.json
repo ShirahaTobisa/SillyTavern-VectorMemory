@@ -1,5 +1,5 @@
 {
-  "display_name": "Vector Memory (RPH)",
+  "display_name": "Vector Memory",
   "loading_order": 100,
   "js": "index.js",
   "css": "style.css",
