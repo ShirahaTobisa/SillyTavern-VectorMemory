@@ -36,7 +36,7 @@ git diff --check
 ## §10 验收清单自查
 
 1. **60+ 轮入库/幂等**：轮次、稳定滞后、≤400 分组、`用户：/角色卡：`、`第 N 轮`、量化字段和双重去重均在 `patrol()`/`assembleTurnFragments()`；纯函数测试覆盖组装和去重。真实 ST 补录尚未执行。
-2. **代码/HTML 清洗**：`stripVectorMemoryCode()` 按 RPH 顺序实现七条逐行启发式；Node 测试验证正常文本保留、代码围栏、script 和 HTML 清除。
+2. **代码/HTML 清洗**：`stripVectorMemoryCode()` 实现七条逐行启发式；Node 测试验证正常文本保留、代码围栏、script 和 HTML 清除。
 3. **keepFloors/注入/不写回**：stub 运行验证旧轮 splice、注入位置和原对象文本不变；实现只对传入 chat 数组 splice。
 4. **压缩区事实召回**：候选使用 int8 余弦、词法 boost、模型过滤和 query 前缀；未连接真实 embedding 服务，需用户实端点复核答案质量。
 5. **同轮合并**：`mergeSameTurnResults()` 有独立测试，优先取当前轮完整清洗文本，缺失时按 fragment fallback。

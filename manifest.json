@@ -3,7 +3,7 @@
   "loading_order": 100,
   "js": "index.js",
   "css": "style.css",
-  "author": "RP-Hub community",
+  "author": "Mornye",
   "version": "2.0.0",
   "minimum_client_version": "1.17.0",
   "auto_update": true,

@@ -624,7 +624,7 @@ function settingsTemplate() {
           <div class="vm-error" data-vm-auto-error hidden>自动巡逻已暂停，请检查 API 配置后手动补录。</div>
           <label class="checkbox_label"><input type="checkbox" data-vm-field="enabled"><span>启用向量记忆</span></label>
           <small class="vm-hint">开启后旧对话可整理成向量记忆；聊天很长时，旧楼层不再原文发送，改由按当前输入检索到的记忆分片代替，节省 token。</small>
-          <label class="checkbox_label"><input type="checkbox" data-vm-field="autoPatrol"><span>自动录入新对话（RPH 原版行为）</span></label>
+          <label class="checkbox_label"><input type="checkbox" data-vm-field="autoPatrol"><span>自动录入新对话</span></label>
           <small class="vm-hint">打开后每次 AI 回复完成，只把最近完成的对话轮增量录入，不会去扫历史记录；历史旧楼层要录入请点下方「立即补录」。默认关闭 = 一切录入都手动。</small>
           <h4 class="vm-h">API 配置</h4>
           <div class="vm-field"><small>预设</small><select class="text_pole" data-vm-field="preset"><option value="siliconflow">SiliconFlow / 聚合器</option><option value="dashscope">DashScope (Qwen)</option><option value="gemini">Gemini (OpenAI compat)</option></select></div>
